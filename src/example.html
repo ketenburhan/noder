@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Noder</title>
+	<style>
+		html, body {
+			margin: 0;
+			padding: 0;
+			overflow: hidden;
+		}
+	</style>
+</head>
+<body>
+	<canvas></canvas>
+	<script src="./noder.js"></script>
+	<script src="./MyNodes.js"></script>
+	<script>
+		var n = new Noder("canvas");
+		let node1 = n.addNode(ExampleNode, 5, 7);
+		let node2 = n.addNode(ExampleNode, 13, 4);
+		let node3 = n.addNode(ExampleNode, 24, 7);
+		n.update();
+	</script>
+</body>
+</html>
