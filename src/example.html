@@ -18,10 +18,24 @@
 	<script src="./MyNodes.js"></script>
 	<script>
 		var n = new Noder("canvas");
-		let node1 = n.addNode(ExampleNode, 5, 7);
-		let node2 = n.addNode(ExampleNode, 13, 4);
-		let node3 = n.addNode(ExampleNode, 24, 7);
-		n.update();
+
+		// creating nodes
+		let node1 = new ExampleNode(5, 7),
+			node2 = new ExampleNode(13, 4),
+			node3 = new ExampleNode(24, 7);
+
+		// adding created nodes
+		n.addNodes(node1, node2, node3);
+
+
+
+		/* also can be done this way
+		 * but when `addNode` called, canvas updating
+		 * so better usage is `addNodes` for multiple nodes.
+		 */
+		// let node1 = n.addNode(ExampleNode, 5, 7);
+		// let node2 = n.addNode(ExampleNode, 13, 4);
+		// let node3 = n.addNode(ExampleNode, 24, 7);
 	</script>
 </body>
 </html>
