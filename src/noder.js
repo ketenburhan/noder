@@ -29,14 +29,12 @@ class Noder {
 		this.update();
 	}
 	getSelectedIndex(node) {
-		let selected = this.selectedObjects.findIndex(o=> o == node);
-		return selected;
+		return this.selectedObjects.findIndex(o=> o == node);
 	}
 	moving = false;
 	wiring = {
 		bool: false,
-		index: 0,
-		node: null,
+		pin: null,
 	};
 	cursor = {
 		x: 0,
@@ -72,9 +70,7 @@ class Noder {
 	getTile(x, y) {
 		for (let node of this.nodes) {
 			if (x >= node.gx && x < node.gx+node.w && y >= node.gy && y < node.gy+node.h) {
-				// return node;
-				let pinIndex = node.getPinIndex(x-node.gx, y-node.gy);
-				return {node, pinIndex};
+				return {node, pin: node.getPinByPos(x, y)};
 			}
 		}
 		return false;
@@ -303,16 +299,26 @@ class Noder {
 			down(noder) {
 				let wiring = noder.wiring;
 				let cursorIsOn = noder.cursorIsOn();
-				if (cursorIsOn && cursorIsOn.pinIindex !== -1) {
-					if (!wiring.bool) {
+				if (cursorIsOn.pin) {
+					if (!wiring.bool && !cursorIsOn.pin.wire) {
 						wiring.bool = true;
-						wiring.node = cursorIsOn.node;
-						wiring.index = cursorIsOn.pinIndex;
+						wiring.pin = cursorIsOn.pin;
 					}
 					else {
 						wiring.bool = false;
-						new Wire(wiring.node, wiring.index, cursorIsOn.node, cursorIsOn.pinIndex);
+						if (!cursorIsOn.pin.wire) {
+							noder.addWire(wiring.pin, cursorIsOn.pin);
+						}
 					}
+				}
+			}
+		},
+		68: { // d (disconnect pin)
+			down(noder) {
+				let cursorIsOn = noder.cursorIsOn();
+				if (cursorIsOn.pin && cursorIsOn.pin.wire) {
+					cursorIsOn.pin.disconnect();
+					noder.update();
 				}
 			}
 		},
@@ -358,9 +364,23 @@ class Noder {
 			newkey.up(this, e);
 		}
 	}
-	addWire(wire) {
+	addWire(pin1, pin2) { // pin1: Pin, pin2: Pin
+		let wire = new Wire(pin1, pin2);
+		pin1.wire = wire;
+		pin2.wire = wire;
 		this.wires.push(wire);
 		this.update();
+	}
+	removeWire(info) {
+		if (info instanceof Wire) {
+			let index = this.wires.findIndex(w => w == info);
+			this.removeWire(index);
+		} else if (typeof info == "number") {
+			let wire = this.wires[info];
+			wire.pin1.wire = null;
+			wire.pin2.wire = null;
+			this.wires.splice(info, 1);
+		}
 	}
 	addNode(nodeConstructor, ...args) {
 		let newnode = new nodeConstructor(...args);
@@ -378,7 +398,7 @@ class Noder {
 	}
 	removeNode(info) {
 		if (info instanceof Node) {
-			let index = nodes.findIndex(info);
+			let index = this.nodes.findIndex(n => n == info);
 			this.removeNode(index);
 		} else if (typeof info == "number") {
 			this.nodes.splice(info, 1);
@@ -393,8 +413,8 @@ class Noder {
 		}
 		// draw wires
 		this.drawSelectedIndicator();
-		this.drawCursor();
 		this.drawWires();
+		this.drawCursor();
 		this.drawWiring();
 	}
 	drawBackground() {
@@ -440,6 +460,11 @@ class Noder {
 		}
 		c.restore();
 	}
+	drawWires() {
+		for (let wire of this.wires) {
+			this.drawWire(...wire.pin1.position, ...wire.pin2.position);
+		}
+	}
 	drawCursor() {
 		let c = this.ctx;
 		c.save();
@@ -447,15 +472,10 @@ class Noder {
 		c.fillRect(this.cursor.x * this.tileSize, this.cursor.y * this.tileSize, this.tileSize, this.tileSize);
 		c.restore();
 	}
-	drawWires() {
-		for (let wire of this.wires) {
-			wire.draw();
-		}
-	}
 	drawWiring() {
 		if (this.wiring.bool) {
-			let pos = this.wiring.node.pinLayout[this.wiring.index];
-			this.drawWire(this.cursor.x, this.cursor.y, pos[0]+this.wiring.node.x, pos[1]+this.wiring.node.y);
+			let pin = this.wiring.pin;
+			this.drawWire(this.cursor.x, this.cursor.y, pin.gx, pin.gy);
 		}
 	}
 	resizeCanvas() {
@@ -523,44 +543,58 @@ class Node {
 	// angle of node
 	// 'angle' can get 0-3 numeric values
 	// 0: 0deg, 1: 90deg, 2:180deg, 3:270deg
-	angle = 0;
+	// angle = 0;
 
 	// pins of node
-	// 'pinLayout' gets array [x,y]
-	pinLayout = [];
-	pinConnection = [];
-	pinState = [];
-    backgroudColor = "#333";
-    pinColor = "#ddd";
-	pinSize = .25; // relative to tilesize
-	
-	getPinIndex(x, y) {
-		return this.pinLayout.findIndex(p => p[0] == x && p[1] == y);
+	pins = {};
+	getPinData(name) {
+		return this.pins[name].data;
 	}
-	readPin(index) {
-		return this.pinConnection[index].pinState(this, index);
+	readPin(name) {
+		return this.pins[name].read();
 	}
-	writePin(index, value) {
-		this.pinState[index] = value;
-		this.pinConnection[index].pinUpdate(this, index, value);
+	writePin(name, value) {
+		return this.pins[name].write(value);
 	}
 	pinUpdate(index, value) {
-		console.log("pin updated: ", index, ",value :", value)
+		// HERE
+		console.log("pin updated: ", index, ",value :", value);
+	}
+	// get
+	getPinByPos(x, y) {
+		x = x-this.gx;
+		y = y-this.gy;
+		for (let pin of Object.values(this.pins)) {
+			if (pin.x == x && pin.y == y) {
+				return pin;
+			}
+		}
+		return;
+	}
+	getPinName(pin) {
+		for (let name in this.pins) {
+			if (this.pins[name] == pin) {
+				return name;
+			}
+		}
+		return;
 	}
 
 
-	drawPinsFirst = true;
+	drawPinsFirst = false;
 	draw() {
 		this.drawBody();
 		if (this.drawPinsFirst) {
 			this.drawPins();
-			this.drawExtras();
+			this.drawExtras(this.noder.ctx, this.noder.tileSize);
 		}
 		else {
-			this.drawExtras();
+			this.drawExtras(this.noder.ctx, this.noder.tileSize);
 			this.drawPins();
 		}
-    }
+	}
+	
+    backgroudColor = "#333";
     drawBody() {
         let c = this.noder.ctx;
         let tilesize = this.noder.tileSize;
@@ -569,24 +603,25 @@ class Node {
         c.fillRect(this.gx*tilesize, this.gy*tilesize, this.w*tilesize, this.h*tilesize);
         c.closePath();
 	}
-	pinWidth = .05;
-    drawPins() {
-        let c = this.noder.ctx;
-        let tilesize = this.noder.tileSize;
 
-        let rectpos = (1 - this.pinSize)/2;
-        for (let pin of this.pinLayout) {
-            let pos = {x: tilesize*(this.gx+rectpos+pin[0]), y: tilesize*(this.gy+rectpos+pin[1])};
-            c.beginPath();
+	pinWidth = .05; // relative to tilesize
+    pinColor = "#ddd";
+	pinSize = .25; // relative to tilesize
+    drawPins() {
+        let c = this.noder.ctx,
+			ts = this.noder.tileSize,
+			rectpos = (1 - this.pinSize)/2;
+		
+		for (let pin of Object.values(this.pins)) {
+			c.beginPath();
             c.strokeStyle = this.pinColor;
-            c.lineWidth = tilesize*this.pinWidth;
-            // console.log(pos.x, pos.y, this.pinSize*tilesize, this.pinSize*tilesize);
-            c.strokeRect(pos.x, pos.y, this.pinSize*tilesize, this.pinSize*tilesize);
+            c.lineWidth = ts*this.pinWidth;
+            c.strokeRect((pin.gx+rectpos)*ts, (pin.gy+rectpos)*ts, this.pinSize*ts, this.pinSize*ts);
             c.closePath();
-        }
+		}
 	}
+
 	drawExtras() {}
-	
 
     get gx() {
         return (this.x-this.noder.offset.x);
@@ -594,48 +629,61 @@ class Node {
     get gy() {
         return (this.y-this.noder.offset.y);
     }
+	get position() {
+		return [this.gx, this.gy];
+	}
+}
+class Pin {
+	wire = null;
+	data;
+	constructor(node, x, y) { // node: Node, x: Number, y: Number
+		this.node = node;
+		this.x = x;
+		this.y = y;
+	}
+	get gx() {
+		return this.node.gx + this.x;
+	}
+	get gy() {
+		return this.node.gy + this.y;
+	}
+	get position() {
+		return [this.gx, this.gy];
+	}
+	connect(wire) { // wire: Wire
+		this.wire = wire;
+		return this;
+	}
+	disconnect() {
+		this.node.noder.removeWire(this.wire);
+		return this;
+	}
+	read() {
+		return this.wire ? this.wire.get(this) : undefined;
+	}
+	write(value) { // value: any
+		this.data = value;
+		if (this.wire) this.wire.send(this);
+		return this;
+	}
+	update() {
+		this.node.pinUpdate();
+		return this;
+	}
 }
 class Wire {
-	constructor(node1, index1, node2, index2) {
-		node1.pinConnection[index1] = this;
-		node2.pinConnection[index2] = this;
-		this.node1 = node1;
-		this.index1 = index1;
-		this.node2 = node2;
-		this.index2 = index2;
-		node1.noder.addWire(this);
-		this.stateUpdate(node1, index1);
-		this.stateUpdate(node2, index2);
+	constructor(pin1, pin2) { // pin1: Pin, pin2: Pin
+		this.pin1 = pin1;
+		this.pin2 = pin2;
 	}
-	
-	draw() {
-		let pos1 = this.node1.pinLayout[this.index1];
-		let pos2 = this.node2.pinLayout[this.index2];
-		this.node1.noder.drawWire(pos1[0]+this.node1.x, pos1[1]+this.node1.y, pos2[0]+this.node2.x, pos2[1]+this.node2.y);
+
+	get(receiver) { // receiver: Pin
+		return this.other(receiver).data;
 	}
-	getOther(node, index) {
-		if (node == this.node1 && index == this.index1) {
-			return {node: this.node2, index:this.index2};
-		}
-		else if (node == this.node2 && index == this.index2) {
-			return {node: this.node1, index:this.index1};
-		}
-		else {
-			console.error(new Error("invalid paramater"));
-		}
+	send(emitter) { // emitter: Pin
+		this.other(emitter).update();
 	}
-	pinState(node, index) {
-		let other = this.getOther(node, index);
-		if (other.node) {
-			return other.node.pinState[other.index];
-		}
-		return "FAIL";
-	}
-	stateUpdate(node, index, value) {
-		let other = this.getOther(node, index);
-		console.log(other);
-		if (other.node) {
-			return other.node.pinUpdate(other.index, value||other.node.pinState[other.index]);
-		}
+	other(requester) { // requester: Pin
+		return (requester === this.pin2) ? this.pin1 : this.pin2;
 	}
 }
